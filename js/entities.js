@@ -43,6 +43,9 @@ class Projectile {
                                                    this.sprite.x, this.sprite.y);
         if (dist > this.maxRange) { this.destroy(); return; }
 
+        // R flies over everything — only range matters
+        if (this.type === 'r') return;
+
         // Destroy on outer wall hit
         const bx = this.sprite.x, by = this.sprite.y;
         if (bx < INNER_L || bx > INNER_R || by < INNER_T || by > INNER_B) {
@@ -431,6 +434,10 @@ class Player {
 
         // Hold M1 for auto-fire
         this._autoFireTimer = 0;
+
+        // Q empowered next auto
+        this.empoweredAuto  = false;
+        this._empoweredGfx  = null;
     }
 
     update(delta) {
@@ -481,6 +488,11 @@ class Player {
             }
         }
 
+        // Track empowered VFX to player position
+        if (this._empoweredGfx) {
+            this._empoweredGfx.setPosition(this.sprite.x, this.sprite.y);
+        }
+
         // Q key = Ezreal W
         if (Phaser.Input.Keyboard.JustDown(this.wasd.q)) this._castW();
         // E key = Ezreal E
@@ -493,8 +505,15 @@ class Player {
         if (this.cds.auto > 0) return;
         this.cds.auto = CD_AUTO;
         this._autoFireTimer = CD_AUTO;
+
+        const dmg = this.empoweredAuto ? Math.floor(DMG_AUTO * 1.5) : DMG_AUTO;
+        if (this.empoweredAuto) {
+            this.empoweredAuto = false;
+            this._clearEmpoweredVFX();
+        }
+
         this.scene.spawnProjectile(this.sprite.x, this.sprite.y, angle, {
-            type: 'auto', damage: DMG_AUTO, speed: SPD_AUTO,
+            type: 'auto', damage: dmg, speed: SPD_AUTO,
             range: RANGE_AUTO, hitR: 7, piercing: false,
         });
     }
@@ -502,6 +521,11 @@ class Player {
     _castQ(angle) {
         if (this.cds.q > 0) return;
         this.cds.q = CD_Q;
+
+        // Next auto-attack deals 1.5x damage
+        this.empoweredAuto = true;
+        this._showEmpoweredVFX();
+
         this.scene.spawnProjectile(this.sprite.x, this.sprite.y, angle, {
             type: 'q', damage: DMG_Q, speed: SPD_Q,
             range: RANGE_Q, hitR: 10, piercing: false,
@@ -566,6 +590,31 @@ class Player {
         this.isCasting  = true;
         this.castTimer  = 1000;
         this.scene.showRCharge(this.sprite.x, this.sprite.y, this.castAngle);
+    }
+
+    _showEmpoweredVFX() {
+        this._clearEmpoweredVFX();
+        const g = this.scene.add.graphics();
+        g.lineStyle(3, CLR.projQ, 0.9);
+        g.strokeCircle(0, 0, 22);
+        g.setDepth(6);
+        this._empoweredGfx = g;
+        // Pulse tween
+        this.scene.tweens.add({
+            targets: g,
+            scaleX: 1.3, scaleY: 1.3,
+            alpha: 0.5,
+            duration: 400,
+            yoyo: true,
+            repeat: -1,
+        });
+    }
+
+    _clearEmpoweredVFX() {
+        if (this._empoweredGfx) {
+            this._empoweredGfx.destroy();
+            this._empoweredGfx = null;
+        }
     }
 
     _fireR(angle) {
