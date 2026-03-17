@@ -125,6 +125,12 @@ class GameScene extends Phaser.Scene {
         // Spawn enemies if not cleared
         if (!room.cleared) {
             this._spawnEnemies(room);
+            // Some rooms (e.g. treasure) mark themselves cleared during spawn —
+            // rebuild walls immediately so door bodies are removed.
+            if (room.cleared) {
+                this._buildWalls(room);
+                this._refreshDoors();
+            }
         }
 
         // Position player at entry door
@@ -146,6 +152,43 @@ class GameScene extends Phaser.Scene {
 
         // Fade in
         this.cameras.main.fadeIn(200, 0, 0, 0);
+    }
+
+    // Generate obstacle tile positions for a room (called once, stored in room data)
+    _generateObstacles(room) {
+        if (room.obstacles) return; // already generated
+        if (room.type === 'start') { room.obstacles = []; return; }
+
+        const dc = DOOR_COL, dr = DOOR_ROW;
+        const midCol = Math.floor(ROOM_COLS / 2);
+        const midRow = Math.floor(ROOM_ROWS / 2);
+        const count  = room.type === 'boss' ? Phaser.Math.Between(2, 4) : Phaser.Math.Between(3, 6);
+        const placed = [];
+
+        const isForbidden = (col, row) => {
+            // Must be inner tile (not wall row/col)
+            if (col <= 1 || col >= ROOM_COLS - 2) return true;
+            if (row <= 1 || row >= ROOM_ROWS - 2) return true;
+            // Keep center 3x3 clear for player spawn
+            if (Math.abs(col - midCol) <= 1 && Math.abs(row - midRow) <= 1) return true;
+            // Keep door corridors clear (1 tile buffer around each door)
+            if (Math.abs(row - 1) <= 1 && Math.abs(col - dc) <= 1) return true;           // north
+            if (Math.abs(row - (ROOM_ROWS - 2)) <= 1 && Math.abs(col - dc) <= 1) return true; // south
+            if (Math.abs(col - 1) <= 1 && Math.abs(row - dr) <= 1) return true;           // west
+            if (Math.abs(col - (ROOM_COLS - 2)) <= 1 && Math.abs(row - dr) <= 1) return true; // east
+            // No overlapping
+            if (placed.some(p => p.col === col && p.row === row)) return true;
+            return false;
+        };
+
+        let attempts = 0;
+        while (placed.length < count && attempts < 200) {
+            attempts++;
+            const col = Phaser.Math.Between(2, ROOM_COLS - 3);
+            const row = Phaser.Math.Between(2, ROOM_ROWS - 3);
+            if (!isForbidden(col, row)) placed.push({ col, row });
+        }
+        room.obstacles = placed;
     }
 
     _drawRoom(room) {
@@ -173,19 +216,44 @@ class GameScene extends Phaser.Scene {
                     row === 0 || row === ROOM_ROWS - 1;
                 if (!isWall) continue;
 
-                // Check if this tile is a door opening
                 if (this._isDoorTile(room, col, row)) continue;
 
-                // Wall shadow (darker bottom face)
                 const isBottom = row === ROOM_ROWS - 1;
                 g.fillStyle(isBottom ? CLR.wallFront : CLR.wall);
                 g.fillRect(ox + col * t, oy + row * t, t, t);
-                // Highlight top edge
                 if (!isBottom) {
                     g.fillStyle(0x7a5030);
                     g.fillRect(ox + col * t, oy + row * t, t, 4);
                 }
             }
+        }
+
+        // Obstacle pillars
+        this._generateObstacles(room);
+        for (const { col, row } of room.obstacles) {
+            const wx = ox + col * t;
+            const wy = oy + row * t;
+            const inset = 6;
+
+            // Shadow
+            g.fillStyle(0x1a0d00, 0.6);
+            g.fillRect(wx + inset + 4, wy + inset + 4, t - inset * 2, t - inset * 2);
+            // Base block face
+            g.fillStyle(0x4a2e10);
+            g.fillRect(wx + inset, wy + inset, t - inset * 2, t - inset * 2);
+            // Top highlight
+            g.fillStyle(0x7a5535);
+            g.fillRect(wx + inset, wy + inset, t - inset * 2, 6);
+            // Left highlight
+            g.fillStyle(0x6a4525);
+            g.fillRect(wx + inset, wy + inset, 6, t - inset * 2);
+            // Bottom/right shadow face
+            g.fillStyle(0x2a1600);
+            g.fillRect(wx + inset, wy + t - inset - 5, t - inset * 2, 5);
+            g.fillRect(wx + t - inset - 5, wy + inset, 5, t - inset * 2);
+            // Crack detail
+            g.lineStyle(1, 0x2a1600, 0.5);
+            g.lineBetween(wx + inset + 10, wy + inset + 8, wx + inset + 14, wy + inset + 18);
         }
 
         // Draw doors (open = coloured arch, closed = dark)
@@ -239,29 +307,37 @@ class GameScene extends Phaser.Scene {
     }
 
     _buildWalls(room) {
-        // Remove old colliders and wall objects
+        // Remove old colliders and static bodies
         for (const c of this._wallColliders) this.physics.world.removeCollider(c);
         this._wallColliders = [];
-        // Destroy old wall rects
         if (this._wallRects) this._wallRects.forEach(r => r.destroy());
         this._wallRects = [];
 
+        const addStaticRect = (wx, wy, w, h) => {
+            const rect = this.add.rectangle(wx, wy, w, h);
+            this.physics.add.existing(rect, true);
+            rect.body.setSize(w, h);
+            rect.body.updateFromGameObject();
+            this._wallRects.push(rect);
+            this.wallsGroup.add(rect);
+        };
+
+        // Outer wall tiles
         for (let col = 0; col < ROOM_COLS; col++) {
             for (let row = 0; row < ROOM_ROWS; row++) {
                 const isEdge = col === 0 || col === ROOM_COLS - 1 || row === 0 || row === ROOM_ROWS - 1;
                 if (!isEdge) continue;
                 if (this._isDoorTile(room, col, row)) continue;
-
-                const wx = OX + col * TILE + TILE / 2;
-                const wy = OY + row * TILE + TILE / 2;
-                // Invisible rectangle with static physics body
-                const rect = this.add.rectangle(wx, wy, TILE, TILE);
-                this.physics.add.existing(rect, true);
-                rect.body.setSize(TILE, TILE);
-                rect.body.updateFromGameObject();
-                this._wallRects.push(rect);
-                this.wallsGroup.add(rect);
+                addStaticRect(OX + col * TILE + TILE / 2, OY + row * TILE + TILE / 2, TILE, TILE);
             }
+        }
+
+        // Obstacle pillars (slightly inset so corners feel fair)
+        this._generateObstacles(room);
+        const INSET = 8;
+        const OBS_SIZE = TILE - INSET * 2;
+        for (const { col, row } of room.obstacles) {
+            addStaticRect(OX + col * TILE + TILE / 2, OY + row * TILE + TILE / 2, OBS_SIZE, OBS_SIZE);
         }
 
         const c1 = this.physics.add.collider(this.player.sprite, this.wallsGroup);

@@ -43,10 +43,23 @@ class Projectile {
                                                    this.sprite.x, this.sprite.y);
         if (dist > this.maxRange) { this.destroy(); return; }
 
-        // Destroy on wall hit
+        // Destroy on outer wall hit
         const bx = this.sprite.x, by = this.sprite.y;
         if (bx < INNER_L || bx > INNER_R || by < INNER_T || by > INNER_B) {
-            this.destroy();
+            this.destroy(); return;
+        }
+
+        // Destroy on obstacle hit
+        const room = this.scene.dungeonGrid && this.scene.dungeonGrid.get(this.scene.currentKey);
+        if (room && room.obstacles) {
+            for (const { col, row } of room.obstacles) {
+                const ox = OX + col * TILE + TILE / 2;
+                const oy = OY + row * TILE + TILE / 2;
+                const half = (TILE - 8) / 2;
+                if (bx > ox - half && bx < ox + half && by > oy - half && by < oy + half) {
+                    this.destroy(); return;
+                }
+            }
         }
     }
 
@@ -207,10 +220,31 @@ class Enemy {
     _bounceWalls() {
         const { x, y } = this.sprite;
         const r = this.cfg.size;
-        if (x - r < INNER_L) this.sprite.setVelocityX(Math.abs(this.sprite.body.velocity.x));
-        if (x + r > INNER_R) this.sprite.setVelocityX(-Math.abs(this.sprite.body.velocity.x));
-        if (y - r < INNER_T) this.sprite.setVelocityY(Math.abs(this.sprite.body.velocity.y));
-        if (y + r > INNER_B) this.sprite.setVelocityY(-Math.abs(this.sprite.body.velocity.y));
+        // Outer walls
+        if (x - r < INNER_L) { this.sprite.x = INNER_L + r; this.sprite.setVelocityX(Math.abs(this.sprite.body.velocity.x)); }
+        if (x + r > INNER_R) { this.sprite.x = INNER_R - r; this.sprite.setVelocityX(-Math.abs(this.sprite.body.velocity.x)); }
+        if (y - r < INNER_T) { this.sprite.y = INNER_T + r; this.sprite.setVelocityY(Math.abs(this.sprite.body.velocity.y)); }
+        if (y + r > INNER_B) { this.sprite.y = INNER_B - r; this.sprite.setVelocityY(-Math.abs(this.sprite.body.velocity.y)); }
+
+        // Obstacle pillars
+        const room = this.scene.dungeonGrid && this.scene.dungeonGrid.get(this.scene.currentKey);
+        if (!room || !room.obstacles) return;
+        const half = (TILE - 8) / 2 + r;
+        for (const { col, row } of room.obstacles) {
+            const ox = OX + col * TILE + TILE / 2;
+            const oy = OY + row * TILE + TILE / 2;
+            const dx = x - ox, dy = y - oy;
+            if (Math.abs(dx) < half && Math.abs(dy) < half) {
+                // Push out along shortest axis
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    this.sprite.x = ox + Math.sign(dx) * half;
+                    this.sprite.setVelocityX(Math.sign(dx) * Math.abs(this.sprite.body.velocity.x));
+                } else {
+                    this.sprite.y = oy + Math.sign(dy) * half;
+                    this.sprite.setVelocityY(Math.sign(dy) * Math.abs(this.sprite.body.velocity.y));
+                }
+            }
+        }
     }
 
     _updateGrunt(delta, dx, dy, dist) {
