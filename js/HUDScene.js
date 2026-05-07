@@ -76,6 +76,12 @@ class HUDScene extends Phaser.Scene {
             fontFamily: 'Arial',
         }).setOrigin(1, 1);
 
+        // ─ Floor indicator ─────────────────────────────────────────────────
+        this.floorText = this.add.text(GAME_W / 2, 12, 'Floor 1', {
+            fontSize: '14px', color: '#ffcc33',
+            fontFamily: 'Arial Black',
+        }).setOrigin(0.5, 0);
+
         // ─ Ability tooltip texts ───────────────────────────────────────────
         this.cdTexts = {};
         this.abilityUIs.forEach(ui => {
@@ -93,10 +99,12 @@ class HUDScene extends Phaser.Scene {
     }
 
     update() {
-        // Kill counter
         const gs = this.game_scene;
         if (gs && gs.player) {
             this.killText.setText(`Kills: ${gs.player.kills}`);
+            if (gs.floor !== undefined) {
+                this.floorText.setText(`Floor ${gs.floor} / ${TOTAL_FLOORS}`);
+            }
         }
     }
 
@@ -182,6 +190,7 @@ class HUDScene extends Phaser.Scene {
     }
 
     _showGameOver() {
+        SFX.gameOver();
         const overlay = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.8);
         this.add.text(GAME_W / 2, GAME_H / 2 - 60, 'GAME OVER', {
             fontSize: '72px', fontFamily: 'Arial Black',

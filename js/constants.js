@@ -58,6 +58,73 @@ const RANGE_Q    = 700;
 const RANGE_W    = 750;
 const RANGE_R    = 2400;
 
+// ─── FLOOR PROGRESSION ───────────────────────────────────────────────────────
+const TOTAL_FLOORS = 3;
+
+// ─── ITEMS ───────────────────────────────────────────────────────────────────
+const ITEMS = [
+    {
+        id: 'arcane_amp',
+        name: 'Arcane Amplifier',
+        desc: 'All ability damage +30%',
+        color: 0xffaa33,
+        apply(player) { player.dmgMult *= 1.30; },
+    },
+    {
+        id: 'phase_walk',
+        name: 'Phase Walk',
+        desc: 'Movement speed +25%',
+        color: 0x44ffcc,
+        apply(player) { player.speed *= 1.25; },
+    },
+    {
+        id: 'arcane_heart',
+        name: 'Arcane Heart',
+        desc: 'Max HP +60, restore to full',
+        color: 0xff4488,
+        apply(player) {
+            player.maxHp += 60;
+            player.hp = player.maxHp;
+            player.scene.events.emit('playerHpChanged', player.hp, player.maxHp);
+        },
+    },
+    {
+        id: 'rapid_fire',
+        name: 'Rapid Fire',
+        desc: 'Auto-attack 35% faster',
+        color: 0xaaddff,
+        apply(player) { player.autoCdMult *= 0.65; },
+    },
+    {
+        id: 'essence_surge',
+        name: 'Essence Surge',
+        desc: 'W and R deal 50% more damage',
+        color: 0x4488ff,
+        apply(player) { player.dmgMultWR *= 1.50; },
+    },
+    {
+        id: 'blink_mastery',
+        name: 'Blink Mastery',
+        desc: 'E cooldown -40%, blink range +120',
+        color: 0x33ffee,
+        apply(player) { player.eCdMult *= 0.60; player.blinkRange += 120; },
+    },
+    {
+        id: 'iron_will',
+        name: 'Iron Will',
+        desc: 'Invincibility frames +60%',
+        color: 0x888888,
+        apply(player) { player.iframeMult *= 1.60; },
+    },
+    {
+        id: 'mystic_charge',
+        name: 'Mystic Charge',
+        desc: 'Q empowers next 3 auto-attacks',
+        color: 0xffcc33,
+        apply(player) { player.empowerStacks = Math.min(5, player.empowerStacks + 2); },
+    },
+];
+
 // ─── COLORS ──────────────────────────────────────────────────────────────────
 const CLR = {
     floor:          0x5c3d1e,

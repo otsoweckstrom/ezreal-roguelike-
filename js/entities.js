@@ -141,6 +141,7 @@ class Enemy {
         }
         this.hp -= dmg;
 
+        SFX.enemyHit();
         // Hit flash
         this.sprite.setTint(0xffffff);
         this.scene.time.delayedCall(90, () => {
@@ -167,6 +168,7 @@ class Enemy {
     die() {
         if (!this.alive) return;
         this.alive = false;
+        this.type === 'boss' ? SFX.bossDeath() : SFX.enemyDeath();
         this.hpBar.destroy();
 
         // Burst particles
@@ -422,7 +424,7 @@ class Player {
 
         // Mouse buttons — use leftButtonDown/rightButtonDown for reliable cross-browser detection
         scene.input.on('pointerdown', p => {
-            if (!this.alive || this.isCasting) return;
+            if (!this.alive || this.isCasting || scene._itemSelecting || scene._paused) return;
             const angle = Phaser.Math.Angle.Between(
                 this.sprite.x, this.sprite.y, p.worldX, p.worldY);
             if (p.leftButtonDown())  this._castAuto(angle);
@@ -435,9 +437,22 @@ class Player {
         // Hold M1 for auto-fire
         this._autoFireTimer = 0;
 
-        // Q empowered next auto
-        this.empoweredAuto  = false;
+        // Q empowered next auto(s)
+        this.empowerCharges = 0;
+        this.empowerStacks  = 1;      // how many autos one Q cast empowers
         this._empoweredGfx  = null;
+
+        // Items collected across all floors (for pause display)
+        this.itemsCollected = [];
+
+        // ── Upgradeable stats ──────────────────────────────────────────
+        this.speed       = PLAYER_SPEED;
+        this.dmgMult     = 1;         // global damage multiplier
+        this.dmgMultWR   = 1;         // bonus for W and R only
+        this.autoCdMult  = 1;         // auto-attack cooldown multiplier
+        this.eCdMult     = 1;         // E cooldown multiplier
+        this.iframeMult  = 1;         // invincibility frame duration
+        this.blinkRange  = 370;       // E blink max distance
     }
 
     update(delta) {
@@ -471,7 +486,7 @@ class Player {
         if (this.wasd.up.isDown)    vy -= 1;
         if (this.wasd.down.isDown)  vy += 1;
         if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
-        this.sprite.setVelocity(vx * PLAYER_SPEED, vy * PLAYER_SPEED);
+        this.sprite.setVelocity(vx * this.speed, vy * this.speed);
 
         // Face cursor
         const ptr   = this.scene.input.activePointer;
@@ -479,17 +494,16 @@ class Player {
             this.sprite.x, this.sprite.y, ptr.worldX, ptr.worldY);
         this.sprite.setRotation(angle);
 
-        // Hold M1 auto-fire
+        // Hold M1 auto-fire (timer is reset inside _castAuto)
         if (this.scene.input.activePointer.leftButtonDown()) {
             this._autoFireTimer -= delta;
             if (this._autoFireTimer <= 0) {
                 this._castAuto(angle);
-                this._autoFireTimer = CD_AUTO;
             }
         }
 
         // Track empowered VFX to player position
-        if (this._empoweredGfx) {
+        if (this._empoweredGfx && this.empowerCharges > 0) {
             this._empoweredGfx.setPosition(this.sprite.x, this.sprite.y);
         }
 
@@ -503,15 +517,18 @@ class Player {
 
     _castAuto(angle) {
         if (this.cds.auto > 0) return;
-        this.cds.auto = CD_AUTO;
-        this._autoFireTimer = CD_AUTO;
+        const autoCd = Math.round(CD_AUTO * this.autoCdMult);
+        this.cds.auto = autoCd;
+        this._autoFireTimer = autoCd;
 
-        const dmg = this.empoweredAuto ? Math.floor(DMG_AUTO * 1.5) : DMG_AUTO;
-        if (this.empoweredAuto) {
-            this.empoweredAuto = false;
-            this._clearEmpoweredVFX();
+        const baseDmg = this.empowerCharges > 0 ? Math.floor(DMG_AUTO * 1.5) : DMG_AUTO;
+        const dmg = Math.round(baseDmg * this.dmgMult);
+        if (this.empowerCharges > 0) {
+            this.empowerCharges--;
+            if (this.empowerCharges === 0) this._clearEmpoweredVFX();
         }
 
+        SFX.shootAuto();
         this.scene.spawnProjectile(this.sprite.x, this.sprite.y, angle, {
             type: 'auto', damage: dmg, speed: SPD_AUTO,
             range: RANGE_AUTO, hitR: 7, piercing: false,
@@ -522,12 +539,13 @@ class Player {
         if (this.cds.q > 0) return;
         this.cds.q = CD_Q;
 
-        // Next auto-attack deals 1.5x damage
-        this.empoweredAuto = true;
+        // Empower next N auto-attacks
+        this.empowerCharges = this.empowerStacks;
         this._showEmpoweredVFX();
 
+        SFX.shootQ();
         this.scene.spawnProjectile(this.sprite.x, this.sprite.y, angle, {
-            type: 'q', damage: DMG_Q, speed: SPD_Q,
+            type: 'q', damage: Math.round(DMG_Q * this.dmgMult), speed: SPD_Q,
             range: RANGE_Q, hitR: 10, piercing: false,
         });
     }
@@ -538,21 +556,22 @@ class Player {
         const ptr   = this.scene.input.activePointer;
         const angle = Phaser.Math.Angle.Between(
             this.sprite.x, this.sprite.y, ptr.worldX, ptr.worldY);
+        SFX.shootW();
         this.scene.spawnProjectile(this.sprite.x, this.sprite.y, angle, {
-            type: 'w', damage: DMG_W, speed: SPD_W,
+            type: 'w', damage: Math.round(DMG_W * this.dmgMult * this.dmgMultWR), speed: SPD_W,
             range: RANGE_W, hitR: 12, piercing: true, marksEnemy: true,
         });
     }
 
     _castE() {
         if (this.cds.e > 0) return;
-        this.cds.e = CD_E;
+        this.cds.e = Math.round(CD_E * this.eCdMult);
 
         const ptr = this.scene.input.activePointer;
         let tx = ptr.worldX, ty = ptr.worldY;
 
         // Clamp range
-        const MAX_BLINK = 370;
+        const MAX_BLINK = this.blinkRange;
         const dx = tx - this.sprite.x, dy = ty - this.sprite.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > MAX_BLINK) {
@@ -565,6 +584,7 @@ class Player {
         ty = Phaser.Math.Clamp(ty, INNER_T + 16, INNER_B - 16);
 
         // Blink VFX at old pos
+        SFX.blinkE();
         this.scene.spawnBlinkVFX(this.sprite.x, this.sprite.y);
         this.sprite.setPosition(tx, ty);
         this.scene.spawnBlinkVFX(tx, ty);
@@ -574,7 +594,7 @@ class Player {
         if (nearest) {
             const a = Phaser.Math.Angle.Between(tx, ty, nearest.sprite.x, nearest.sprite.y);
             this.scene.spawnProjectile(tx, ty, a, {
-                type: 'e', damage: DMG_E, speed: SPD_Q,
+                type: 'e', damage: Math.round(DMG_E * this.dmgMult), speed: SPD_Q,
                 range: RANGE_Q, hitR: 9, piercing: false,
             });
         }
@@ -589,6 +609,7 @@ class Player {
             this.sprite.x, this.sprite.y, ptr.worldX, ptr.worldY);
         this.isCasting  = true;
         this.castTimer  = 1000;
+        SFX.chargeR();
         this.scene.showRCharge(this.sprite.x, this.sprite.y, this.castAngle);
     }
 
@@ -618,8 +639,9 @@ class Player {
     }
 
     _fireR(angle) {
+        SFX.shootR();
         this.scene.spawnProjectile(this.sprite.x, this.sprite.y, angle, {
-            type: 'r', damage: DMG_R, speed: SPD_R,
+            type: 'r', damage: Math.round(DMG_R * this.dmgMult * this.dmgMultWR), speed: SPD_R,
             range: RANGE_R, hitR: 22, piercing: true,
         });
     }
@@ -628,8 +650,9 @@ class Player {
         if (this.invincible || !this.alive) return;
         this.hp -= amount;
         if (this.hp < 0) this.hp = 0;
+        SFX.playerHit();
         this.invincible = true;
-        this.invTimer   = IFRAME_MS;
+        this.invTimer   = Math.round(IFRAME_MS * this.iframeMult);
         this.scene.cameras.main.shake(120, 0.008);
         this.scene.events.emit('playerHpChanged', this.hp, this.maxHp);
         if (this.hp <= 0) this.die();

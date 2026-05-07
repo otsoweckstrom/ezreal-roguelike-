@@ -24,10 +24,40 @@ class GameScene extends Phaser.Scene {
         this.roomGfx  = this.add.graphics().setDepth(0);
         this.doorGfx  = this.add.graphics().setDepth(1);
 
+        // ── Floor & player persistence ─────────────────────────────────
+        const sceneData = this.scene.settings.data || {};
+        this.floor = sceneData.floor || 1;
+        this._itemSelecting = false;
+        this._paused        = false;
+        this._pauseContainer = null;
+
         // Player
         const cx = OX + ROOM_W / 2;
         const cy = OY + ROOM_H / 2;
         this.player = new Player(this, cx, cy);
+
+        // Restore upgrades from previous floor
+        if (sceneData.playerData) {
+            const pd = sceneData.playerData;
+            this.player.hp           = pd.hp;
+            this.player.maxHp        = pd.maxHp;
+            this.player.dmgMult      = pd.dmgMult;
+            this.player.dmgMultWR    = pd.dmgMultWR;
+            this.player.speed        = pd.speed;
+            this.player.autoCdMult   = pd.autoCdMult;
+            this.player.eCdMult      = pd.eCdMult;
+            this.player.iframeMult   = pd.iframeMult;
+            this.player.blinkRange   = pd.blinkRange;
+            this.player.empowerStacks  = pd.empowerStacks;
+            this.player.kills          = pd.kills;
+            this.player.itemsCollected = pd.itemsCollected || [];
+        }
+
+        // ESC to pause
+        this.input.keyboard.on('keydown-ESC', () => {
+            if (this._itemSelecting || !this.player.alive) return;
+            this._paused ? this._hidePause() : this._showPause();
+        });
 
         // Physics world bounds = full canvas (no auto boundary)
         this.physics.world.setBounds(0, 0, GAME_W, GAME_H);
@@ -43,12 +73,13 @@ class GameScene extends Phaser.Scene {
         this.time.delayedCall(100, () => {
             this.events.emit('playerHpChanged', this.player.hp, this.player.maxHp);
             this.events.emit('dungeonChanged', this.dungeonGrid, this.currentKey);
+            this._showFloorBanner();
         });
     }
 
     // ─── UPDATE ──────────────────────────────────────────────────────────────
     update(time, delta) {
-        if (!this.player.alive) return;
+        if (!this.player.alive || this._itemSelecting) return;
 
         this.player.update(delta);
 
@@ -379,6 +410,7 @@ class GameScene extends Phaser.Scene {
 
         if (type === 'boss') {
             const e = new Enemy(this, cx, cy, 'boss');
+            this._scaleEnemy(e);
             this.enemies.push(e);
             return;
         }
@@ -403,6 +435,7 @@ class GameScene extends Phaser.Scene {
                 Phaser.Math.Distance.Between(x, y, cx, cy) < 160 && attempts < 20
             );
             const e = new Enemy(this, x, y, t);
+            this._scaleEnemy(e);
             this.enemies.push(e);
         }
     }
@@ -439,6 +472,7 @@ class GameScene extends Phaser.Scene {
         if (Math.sqrt(dx * dx + dy * dy) < 40) {
             this._pickupSprite.destroy();
             this._pickupActive = false;
+            SFX.pickup();
             this.player.maxHp  = Math.min(PLAYER_MAX_HP * 1.5, this.player.maxHp + 25);
             this.player.heal(50);
             this.spawnDmgText(px, py - 30, 'HP UP!', false, 0x44ff44);
@@ -531,12 +565,13 @@ class GameScene extends Phaser.Scene {
         this._refreshDoors();
         this._buildWalls(room); // rebuild so door tiles lose their wall bodies
 
-        // Boss defeated = win
+        // Boss defeated — show item selection then descend
         if (room.type === 'boss') {
-            this.time.delayedCall(1500, () => this._showVictory());
+            this.time.delayedCall(1200, () => this._showItemSelection());
             return;
         }
 
+        SFX.roomClear();
         // Heal a bit on room clear
         this.player.heal(8);
         this.spawnDmgText(this.player.sprite.x, this.player.sprite.y - 50, '+8 HP', false, 0x44ff44);
@@ -624,29 +659,296 @@ class GameScene extends Phaser.Scene {
         this.projectiles = [];
     }
 
+    // ─── PAUSE ───────────────────────────────────────────────────────────────
+    _showPause() {
+        this._paused = true;
+        this.physics.world.pause();
+
+        const pw = 500, ph = 440;
+        const px = (GAME_W - pw) / 2;
+        const py = (GAME_H - ph) / 2;
+
+        const c = this.add.container(0, 0).setDepth(40);
+        this._pauseContainer = c;
+
+        const bgGfx = this.add.graphics();
+        bgGfx.fillStyle(0x000000, 0.90);
+        bgGfx.fillRoundedRect(px, py, pw, ph, 12);
+        bgGfx.lineStyle(2, 0x2a3a5a);
+        bgGfx.strokeRoundedRect(px, py, pw, ph, 12);
+        c.add(bgGfx);
+
+        c.add(this.add.text(GAME_W / 2, py + 22, 'PAUSED', {
+            fontSize: '36px', fontFamily: 'Arial Black',
+            color: '#ffffff', stroke: '#000', strokeThickness: 4,
+        }).setOrigin(0.5, 0));
+
+        const divGfx = this.add.graphics();
+        divGfx.lineStyle(1, 0x2a3a5a);
+        divGfx.lineBetween(px + 18, py + 74, px + pw - 18, py + 74);
+        divGfx.lineBetween(GAME_W / 2, py + 74, GAME_W / 2, py + ph - 46);
+        c.add(divGfx);
+
+        const p   = this.player;
+        const lx  = px + 28;
+        const rx  = GAME_W / 2 + 18;
+        const lh  = 26;
+        let   ly  = py + 90;
+        let   ry  = py + 90;
+
+        // ── Left: stats ───────────────────────────────────────────────
+        c.add(this.add.text(lx, ly, 'STATS', {
+            fontSize: '11px', fontFamily: 'Arial Black', color: '#334455',
+        }));
+        ly += 22;
+
+        const stats = [
+            ['HP',        `${Math.ceil(p.hp)} / ${p.maxHp}`],
+            ['Floor',     `${this.floor} / ${TOTAL_FLOORS}`],
+            ['Kills',     `${p.kills}`],
+            ['Damage',    `×${p.dmgMult.toFixed(2)}`],
+            ['W / R Dmg', `×${(p.dmgMult * p.dmgMultWR).toFixed(2)}`],
+            ['Speed',     `${Math.round(p.speed)}`],
+            ['Auto CD',   `${Math.round(CD_AUTO * p.autoCdMult)}ms`],
+            ['E CD',      `${(CD_E * p.eCdMult / 1000).toFixed(1)}s`],
+            ['iFrames',   `${(IFRAME_MS * p.iframeMult / 1000).toFixed(1)}s`],
+            ['Blink',     `${Math.round(p.blinkRange)}px`],
+            ['Q stacks',  `${p.empowerStacks}`],
+        ];
+
+        stats.forEach(([label, val]) => {
+            c.add(this.add.text(lx, ly, label, {
+                fontSize: '13px', color: '#556677', fontFamily: 'Arial',
+            }));
+            c.add(this.add.text(lx + 100, ly, val, {
+                fontSize: '13px', color: '#aaccee', fontFamily: 'Arial Black',
+            }));
+            ly += lh;
+        });
+
+        // ── Right: upgrades collected ─────────────────────────────────
+        c.add(this.add.text(rx, ry, 'UPGRADES', {
+            fontSize: '11px', fontFamily: 'Arial Black', color: '#334455',
+        }));
+        ry += 22;
+
+        const collected = p.itemsCollected || [];
+        if (collected.length === 0) {
+            c.add(this.add.text(rx, ry, 'None yet', {
+                fontSize: '13px', color: '#2a3a4a', fontFamily: 'Arial',
+                fontStyle: 'italic',
+            }));
+        } else {
+            collected.forEach(name => {
+                const item = ITEMS.find(it => it.name === name);
+                const col  = item ? '#' + item.color.toString(16).padStart(6, '0') : '#aaaaaa';
+                c.add(this.add.text(rx, ry, `• ${name}`, {
+                    fontSize: '13px', color: col, fontFamily: 'Arial',
+                    wordWrap: { width: pw / 2 - 26 },
+                }));
+                ry += lh;
+            });
+        }
+
+        // ── Footer ────────────────────────────────────────────────────
+        c.add(this.add.text(GAME_W / 2, py + ph - 28, 'Press  ESC  to resume', {
+            fontSize: '14px', color: '#445566', fontFamily: 'Arial',
+        }).setOrigin(0.5, 0));
+    }
+
+    _hidePause() {
+        this._paused = false;
+        this.physics.world.resume();
+        if (this._pauseContainer) {
+            this._pauseContainer.destroy(true);
+            this._pauseContainer = null;
+        }
+    }
+
+    // ─── ENEMY FLOOR SCALING ─────────────────────────────────────────────────
+    _scaleEnemy(e) {
+        if (this.floor <= 1) return;
+        const f       = this.floor - 1;
+        const hpMult  = 1 + f * 0.22;
+        const spdMult = 1 + f * 0.08;
+        const dmgMult = 1 + f * 0.15;
+        e.hp    = Math.round(e.hp    * hpMult);
+        e.maxHp = Math.round(e.maxHp * hpMult);
+        const nc = { ...e.cfg,
+            speed:      Math.round(e.cfg.speed      * spdMult),
+            contactDmg: Math.round(e.cfg.contactDmg * dmgMult),
+        };
+        if (e.cfg.chargeSpeed) nc.chargeSpeed = Math.round(e.cfg.chargeSpeed * spdMult);
+        if (e.cfg.shootCD)     nc.shootCD     = Math.round(e.cfg.shootCD / spdMult);
+        e.cfg = nc;
+    }
+
+    // ─── ITEM SELECTION ──────────────────────────────────────────────────────
+    _showItemSelection() {
+        this._itemSelecting = true;
+
+        const pool    = Phaser.Utils.Array.Shuffle([...ITEMS]);
+        const choices = pool.slice(0, 3);
+
+        this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.88).setDepth(30);
+
+        this.add.text(GAME_W / 2, 65, `FLOOR ${this.floor} CLEARED`, {
+            fontSize: '40px', fontFamily: 'Arial Black',
+            color: '#ffcc33', stroke: '#000000', strokeThickness: 6,
+        }).setOrigin(0.5).setDepth(31);
+
+        const subMsg = this.floor < TOTAL_FLOORS
+            ? `Descending to Floor ${this.floor + 1}`
+            : 'Final floor — claim your prize!';
+        this.add.text(GAME_W / 2, 120, subMsg, {
+            fontSize: '18px', color: '#aaaaaa', fontFamily: 'Arial',
+        }).setOrigin(0.5).setDepth(31);
+
+        this.add.text(GAME_W / 2, 152, 'Choose an upgrade:', {
+            fontSize: '20px', color: '#ffffff', fontFamily: 'Arial',
+        }).setOrigin(0.5).setDepth(31);
+
+        const cardW = 210, cardH = 268, gap = 24;
+        const totalW = 3 * cardW + 2 * gap;
+        const startX = (GAME_W - totalW) / 2;
+        const cardY  = 188;
+
+        const zones = [];
+        choices.forEach((item, i) => {
+            const cx = startX + i * (cardW + gap);
+
+            const gfx = this.add.graphics().setDepth(31);
+            const drawCard = (hovered) => {
+                gfx.clear();
+                gfx.fillStyle(hovered ? 0x1e1e3a : 0x0d0d20);
+                gfx.fillRoundedRect(cx, cardY, cardW, cardH, 10);
+                gfx.lineStyle(hovered ? 3 : 2, item.color, hovered ? 1.0 : 0.6);
+                gfx.strokeRoundedRect(cx, cardY, cardW, cardH, 10);
+                if (hovered) {
+                    gfx.lineStyle(10, item.color, 0.12);
+                    gfx.strokeRoundedRect(cx - 4, cardY - 4, cardW + 8, cardH + 8, 14);
+                }
+            };
+            drawCard(false);
+
+            // Icon
+            const iconGfx = this.add.graphics().setDepth(32);
+            iconGfx.fillStyle(item.color, 0.12);
+            iconGfx.fillCircle(cx + cardW / 2, cardY + 66, 50);
+            iconGfx.fillStyle(item.color, 0.85);
+            iconGfx.fillCircle(cx + cardW / 2, cardY + 66, 36);
+            iconGfx.fillStyle(0xffffff, 0.25);
+            iconGfx.fillCircle(cx + cardW / 2 - 11, cardY + 54, 13);
+
+            this.add.text(cx + cardW / 2, cardY + 118, item.name, {
+                fontSize: '15px', fontFamily: 'Arial Black',
+                color: '#ffffff', stroke: '#000000', strokeThickness: 2,
+                wordWrap: { width: cardW - 16 }, align: 'center',
+            }).setOrigin(0.5, 0).setDepth(32);
+
+            this.add.text(cx + cardW / 2, cardY + 163, item.desc, {
+                fontSize: '13px', color: '#99aacc', fontFamily: 'Arial',
+                wordWrap: { width: cardW - 22 }, align: 'center',
+            }).setOrigin(0.5, 0).setDepth(32);
+
+            this.add.text(cx + cardW / 2, cardY + cardH - 22, '— click to choose —', {
+                fontSize: '10px', color: '#445566', fontFamily: 'Arial',
+            }).setOrigin(0.5, 0).setDepth(32);
+
+            const zone = this.add.zone(cx + cardW / 2, cardY + cardH / 2, cardW, cardH)
+                .setInteractive().setDepth(35);
+            zones.push(zone);
+
+            zone.on('pointerover', () => {
+                drawCard(true);
+                this.game.canvas.style.cursor = 'pointer';
+            });
+            zone.on('pointerout', () => {
+                drawCard(false);
+                this.game.canvas.style.cursor = 'default';
+            });
+            zone.on('pointerdown', () => {
+                zones.forEach(z => z.destroy());
+                this.game.canvas.style.cursor = 'default';
+                this.player.itemsCollected.push(item.name);
+                item.apply(this.player);
+                SFX.itemChosen();
+                this._startNextFloor();
+            });
+        });
+    }
+
+    _startNextFloor() {
+        const pd = {
+            hp:             this.player.hp,
+            maxHp:          this.player.maxHp,
+            dmgMult:        this.player.dmgMult,
+            dmgMultWR:      this.player.dmgMultWR,
+            speed:          this.player.speed,
+            autoCdMult:     this.player.autoCdMult,
+            eCdMult:        this.player.eCdMult,
+            iframeMult:     this.player.iframeMult,
+            blinkRange:     this.player.blinkRange,
+            empowerStacks:  this.player.empowerStacks,
+            kills:          this.player.kills,
+            itemsCollected: this.player.itemsCollected,
+        };
+
+        if (this.floor >= TOTAL_FLOORS) {
+            this._showTrueVictory();
+            return;
+        }
+
+        this.cameras.main.fadeOut(300, 0, 0, 0);
+        this.time.delayedCall(300, () => {
+            this.scene.stop('HUDScene');
+            this.scene.restart({ floor: this.floor + 1, playerData: pd });
+        });
+    }
+
+    _showFloorBanner() {
+        if (this.floor <= 1) return;
+        const txt = this.add.text(GAME_W / 2, GAME_H / 2, `FLOOR  ${this.floor}`, {
+            fontSize: '80px', fontFamily: 'Arial Black',
+            color: '#ffcc33', stroke: '#000000', strokeThickness: 8,
+        }).setOrigin(0.5).setDepth(25).setAlpha(0);
+
+        this.tweens.add({
+            targets: txt,
+            alpha: { from: 0, to: 1 },
+            duration: 350,
+            yoyo: true, hold: 700,
+            onComplete: () => txt.destroy(),
+        });
+    }
+
     // ─── GAME OVER / VICTORY ─────────────────────────────────────────────────
-    _showVictory() {
-        const overlay = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.7).setDepth(20);
-        this.add.text(GAME_W / 2, GAME_H / 2 - 60, 'VICTORY', {
-            fontSize: '72px', fontFamily: 'Arial Black',
-            color: '#ffcc33', stroke: '#000', strokeThickness: 6,
+    _showTrueVictory() {
+        SFX.victory();
+        this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.75).setDepth(20);
+        this.add.text(GAME_W / 2, GAME_H / 2 - 90, 'VICTORY!', {
+            fontSize: '80px', fontFamily: 'Arial Black',
+            color: '#ffcc33', stroke: '#000', strokeThickness: 7,
         }).setOrigin(0.5).setDepth(21);
-        this.add.text(GAME_W / 2, GAME_H / 2 + 20, `Enemies defeated: ${this.player.kills}`, {
-            fontSize: '28px', color: '#ffffff',
+        this.add.text(GAME_W / 2, GAME_H / 2 - 10, `All ${TOTAL_FLOORS} floors cleared!`, {
+            fontSize: '26px', color: '#ffffff', fontFamily: 'Arial',
         }).setOrigin(0.5).setDepth(21);
-        this.add.text(GAME_W / 2, GAME_H / 2 + 80, 'Press R to restart', {
-            fontSize: '22px', color: '#aaaaaa',
+        this.add.text(GAME_W / 2, GAME_H / 2 + 42, `Total kills: ${this.player.kills}`, {
+            fontSize: '22px', color: '#aaaaaa', fontFamily: 'Arial',
         }).setOrigin(0.5).setDepth(21);
-        this.input.keyboard.once('keydown-R', () => this.scene.restart());
+        this.add.text(GAME_W / 2, GAME_H / 2 + 100, 'Press R to play again', {
+            fontSize: '20px', color: '#555555', fontFamily: 'Arial',
+        }).setOrigin(0.5).setDepth(21);
+        this.input.keyboard.once('keydown-R', () => {
+            this.scene.stop('HUDScene');
+            this.scene.restart();
+        });
     }
 
     // ─── TEXTURE GENERATION ──────────────────────────────────────────────────
     _buildTextures() {
         // Player — blue body with gold accents
         this._makeTex('player', 64, 64, g => {
-            // Shadow
-            g.fillStyle(0x000000, 0.3);
-            g.fillEllipse(32, 44, 38, 14);
             // Body
             g.fillStyle(CLR.player);
             g.fillCircle(32, 30, 18);
@@ -661,9 +963,7 @@ class GameScene extends Phaser.Scene {
             g.fillStyle(0x001188);
             g.fillCircle(27, 27, 2);
             g.fillCircle(37, 27, 2);
-            // Scarf / hair
-            g.fillStyle(0x884400);
-            g.fillRect(24, 14, 16, 6);
+
         });
 
         // Enemy: grunt
