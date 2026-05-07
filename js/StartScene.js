@@ -94,6 +94,19 @@ class StartScene extends Phaser.Scene {
             fontSize: '13px', color: '#334455', fontFamily: 'Arial',
         }).setOrigin(0.5);
 
+        // ── Quit button ───────────────────────────────────────────────
+        const quitBtn = this.add.text(cx, H - 14, 'QUIT', {
+            fontSize: '13px', fontFamily: 'Arial Black', color: '#334455',
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+        quitBtn.on('pointerover', () => quitBtn.setColor('#ff4444'));
+        quitBtn.on('pointerout',  () => quitBtn.setColor('#334455'));
+        quitBtn.on('pointerdown', () => {
+            window.close();
+            // Fallback if browser blocks window.close()
+            quitBtn.setText('Close this tab to quit').setColor('#ff4444').disableInteractive();
+        });
+
         // ── Start prompt ──────────────────────────────────────────────
         const prompt = this.add.text(cx, H - 42, 'PRESS  SPACE  OR  CLICK  TO  START', {
             fontSize: '19px', fontFamily: 'Arial Black',

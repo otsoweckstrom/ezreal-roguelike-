@@ -751,9 +751,25 @@ class GameScene extends Phaser.Scene {
         }
 
         // ── Footer ────────────────────────────────────────────────────
-        c.add(this.add.text(GAME_W / 2, py + ph - 28, 'Press  ESC  to resume', {
+        c.add(this.add.text(GAME_W / 2, py + ph - 46, 'Press  ESC  to resume', {
             fontSize: '14px', color: '#445566', fontFamily: 'Arial',
         }).setOrigin(0.5, 0));
+
+        const menuBtn = this.add.text(GAME_W / 2, py + ph - 24, 'MAIN MENU', {
+            fontSize: '13px', fontFamily: 'Arial Black', color: '#556677',
+        }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
+        menuBtn.on('pointerover', () => menuBtn.setColor('#ffcc33'));
+        menuBtn.on('pointerout',  () => menuBtn.setColor('#556677'));
+        menuBtn.on('pointerdown', () => this._goToMainMenu());
+        c.add(menuBtn);
+    }
+
+    _goToMainMenu() {
+        this._paused = false;
+        this.physics.world.resume();
+        if (this._pauseContainer) { this._pauseContainer.destroy(true); this._pauseContainer = null; }
+        this.scene.stop('HUDScene');
+        this.scene.start('StartScene');
     }
 
     _hidePause() {
