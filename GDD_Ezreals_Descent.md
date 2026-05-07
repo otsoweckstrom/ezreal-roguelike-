@@ -14,6 +14,8 @@
 | SFX / Music | Web Audio API — all sounds are synthesized procedurally in code using oscillators and noise buffers, no audio files |
 | Other | Git / GitHub for version control |
 
+**Live game:** https://ezreal-roguelike.vercel.app/
+
 **Link to project video:** `<link to video here>`
 
 ---
@@ -52,7 +54,7 @@ A blue-armored mage equipped with an arcane gauntlet that fires energy projectil
 ### 4.1 Main Mechanics
 
 **Dungeon Progression**
-The game generates a new dungeon of 12 connected rooms each run using a randomised BFS-style layout algorithm (inspired by The Binding of Isaac). Rooms are connected by doors that only open once all enemies in the room are defeated. One room is designated the Boss Room (furthest from the start by BFS distance), and dead-end rooms become Treasure Rooms containing a healing pickup.
+The game generates a new dungeon of 12 connected rooms each run using a randomised BFS-style layout algorithm (inspired by The Binding of Isaac). Rooms are connected by doors that only open once all enemies in the room are defeated. One room is designated the Boss Room (furthest from the start by BFS distance), and dead-end rooms become Treasure Rooms containing a randomly rolled pickup.
 
 **Floor System**
 The game spans three floors. After defeating the boss on each floor, the player is presented with three random items from a pool of eight. They choose one, then descend to the next floor where enemies have scaled-up HP, speed, and damage. Clearing all three floors triggers the victory screen.
@@ -146,8 +148,15 @@ The aesthetic goal is clarity — the player must be able to read the battlefiel
 - **Phases**: Single phase with escalating aggression below 50% HP
 - **Threat**: Very high; requires managing both incoming spread shots and the charge pattern simultaneously
 
-### Treasure Pickup (Gold Diamond)
-- Not an enemy — a floating gold diamond in Treasure Rooms. Walking over it heals 50 HP and permanently increases max HP by 25.
+### Treasure Pickups (Coloured Diamonds)
+- Not enemies — floating diamonds found in Treasure Rooms. Walking over one applies a random boost. The diamond's colour indicates the type before the player picks it up:
+
+| Colour | Boost |
+|--------|-------|
+| Pink | HP UP — heal 50 HP, max HP +25 |
+| Cyan | Speed UP — movement speed +18% |
+| Orange | DMG UP — all ability damage +20% |
+| Blue | ATK SPD UP — auto-attack 28% faster |
 
 ### Stone Pillar Obstacles
 - Randomly placed solid obstacles in each room (3–6 in normal rooms, 2–4 in Boss Room, none in Start Room). Block player and enemy movement and destroy most projectiles on contact. R (Trueshot) flies over them.
@@ -193,7 +202,7 @@ Enemies are noticeably stronger. The player carries two upgrades and must use bo
 | Q key | Essence Flux (W) — fires a piercing blue projectile that marks enemies for bonus damage |
 | E key | Arcane Shift (E) — instantly blinks to cursor position (max 370 px) and fires at nearest enemy |
 | R key | Trueshot (R) — 1-second charge-up, then fires a powerful piercing shot that travels the full room |
-| ESC | Pause game / view current stats and collected upgrades |
+| ESC | Pause game / view current stats and collected upgrades / return to main menu |
 | R (on death / victory screen) | Restart from Floor 1 |
 
 ### 8.3 Technical Architecture
@@ -208,7 +217,7 @@ The codebase is split across six JavaScript files loaded in order:
 | `dungeon.js` | `DungeonGenerator` — procedural 12-room layout via random BFS walk |
 | `GameScene.js` | Main Phaser scene — game loop, room management, floor transitions, item selection, pause |
 | `HUDScene.js` | Overlay Phaser scene — HP bar, ability cooldowns, minimap, floor indicator, kill counter |
-| `StartScene.js` | Title screen with controls reference |
+| `StartScene.js` | Title screen with controls reference and quit button |
 | `main.js` | Phaser game configuration and scene list |
 
 **Floor persistence**: Player stats and collected upgrades are serialised into a plain object and passed to `scene.restart()` via Phaser's scene data API when descending floors, avoiding the need for localStorage or a backend.
@@ -250,4 +259,4 @@ The character concept is inspired by Ezreal from League of Legends (Riot Games),
 
 ---
 
-*Document version 1.0 — Otso Weckström, 0547090*
+*Document version 1.1 — Otso Weckström, 0547090*
