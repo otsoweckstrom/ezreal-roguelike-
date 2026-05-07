@@ -441,24 +441,37 @@ class GameScene extends Phaser.Scene {
     }
 
     _spawnPickup(x, y) {
-        const pickup = this.add.graphics();
-        pickup.fillStyle(0xffdd44);
-        // Draw a diamond shape (no fillStar in Phaser)
+        // Pick a random type
+        this._pickupType = PICKUPS[Math.floor(Math.random() * PICKUPS.length)];
+        const type = this._pickupType;
+
         const pts = [
             { x: 0,  y: -22 }, { x: 14, y: 0 },
             { x: 0,  y:  22 }, { x:-14, y: 0 },
         ];
+
+        const pickup = this.add.graphics();
+        pickup.fillStyle(type.color);
         pickup.fillPoints(pts, true);
-        pickup.lineStyle(2, 0xffffff);
+        pickup.lineStyle(2, 0xffffff, 0.8);
         pickup.strokePoints(pts, true);
         pickup.setPosition(x, y);
         pickup.setDepth(3);
+
+        // Label above diamond
+        const label = this.add.text(x, y - 34, type.label.replace('!', ''), {
+            fontSize: '11px', fontFamily: 'Arial Black',
+            color: '#' + type.color.toString(16).padStart(6, '0'),
+            stroke: '#000000', strokeThickness: 3,
+        }).setOrigin(0.5, 1).setDepth(4);
+
         this._pickupSprite = pickup;
+        this._pickupLabel  = label;
         this._pickupActive = true;
 
         this.tweens.add({
-            targets: pickup,
-            y: y - 8,
+            targets: [pickup, label],
+            y: `+=${-8}`,
             duration: 800,
             yoyo: true,
             repeat: -1,
@@ -471,11 +484,13 @@ class GameScene extends Phaser.Scene {
         const dx = px - this._pickupSprite.x, dy = py - this._pickupSprite.y;
         if (Math.sqrt(dx * dx + dy * dy) < 40) {
             this._pickupSprite.destroy();
+            if (this._pickupLabel) { this._pickupLabel.destroy(); this._pickupLabel = null; }
             this._pickupActive = false;
             SFX.pickup();
-            this.player.maxHp  = Math.min(PLAYER_MAX_HP * 1.5, this.player.maxHp + 25);
-            this.player.heal(50);
-            this.spawnDmgText(px, py - 30, 'HP UP!', false, 0x44ff44);
+            this._pickupType.apply(this.player);
+            this.events.emit('playerHpChanged', this.player.hp, this.player.maxHp);
+            this.spawnDmgText(px, py - 30, this._pickupType.label, true,
+                this._pickupType.color);
         }
     }
 
@@ -629,6 +644,7 @@ class GameScene extends Phaser.Scene {
         this.time.delayedCall(180, () => {
             this._pickupActive = false;
             if (this._pickupSprite) { this._pickupSprite.destroy(); this._pickupSprite = null; }
+            if (this._pickupLabel)  { this._pickupLabel.destroy();  this._pickupLabel  = null; }
             this._enterRoom(nextKey, opp);
             this.time.delayedCall(250, () => { this.transitioning = false; });
         });

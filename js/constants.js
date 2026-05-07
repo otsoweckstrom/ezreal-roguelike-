@@ -58,6 +58,37 @@ const RANGE_Q    = 700;
 const RANGE_W    = 750;
 const RANGE_R    = 2400;
 
+// ─── TREASURE ROOM PICKUPS ───────────────────────────────────────────────────
+const PICKUPS = [
+    {
+        id: 'hp',
+        label: 'HP UP!',
+        color: 0xff4488,
+        apply(player) {
+            player.maxHp = Math.min(PLAYER_MAX_HP * 2, player.maxHp + 25);
+            player.heal(50);
+        },
+    },
+    {
+        id: 'speed',
+        label: 'SPEED UP!',
+        color: 0x44ffcc,
+        apply(player) { player.speed *= 1.18; },
+    },
+    {
+        id: 'damage',
+        label: 'DMG UP!',
+        color: 0xffaa33,
+        apply(player) { player.dmgMult *= 1.20; },
+    },
+    {
+        id: 'atkspd',
+        label: 'ATK SPD UP!',
+        color: 0xaaddff,
+        apply(player) { player.autoCdMult *= 0.72; },
+    },
+];
+
 // ─── FLOOR PROGRESSION ───────────────────────────────────────────────────────
 const TOTAL_FLOORS = 3;
 
